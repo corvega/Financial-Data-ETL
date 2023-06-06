@@ -1,0 +1,184 @@
+---
+title: "Financial Data Transformation"
+author: "Felix Mayo"
+date: "2022-12-02"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+```
+
+# Financial Data Transformation
+
+## A.1
+
+Loading the finance_data_2022.csv into a data frame called "data_original" and displaying the first 5 records.
+
+```{r}
+#configuring the folder path of the finance data file
+folder_path <- "data/"
+file_name <- "finance_data_2022.csv"
+#combining the path and file name
+file_path <- paste(folder_path,file_name,sep="")
+#loading the data using "read.csv" of the concatenated path and file name
+data_original <- read.csv(file_path)
+head(data_original,5)
+
+```
+
+Calculating the number of rows in "finance_data.csv". Note this count is excluding the header
+
+```{r}
+data_original%>%nrow()
+```
+
+Calculating the number of columns in "finance_data.csv"
+
+```{r}
+data_original%>%ncol()
+```
+
+## A.2
+
+Creating a new data frame from "data_original" and renaming the columns and selecting only relevant columns.
+
+```{r}
+#creating a new variable that is using the data_original data frame
+finance_data <- data_original %>% 
+#renaming columns
+  rename("IFC"="IFC.Region",
+         "IFC_CC"="IFC.Cumulative.Commitments..US..Thousands.",
+         "Loan_Guarantee_CC" ="Loan...Guarantee.participations.Cumulative.Commitments..US..Thousands.",
+         "Date"="As.of.Date") %>% 
+#selecting only the relevant columns
+  select("IFC","IFC_CC","Country","Loan_Guarantee_CC","Date")
+#showing the first 5 rows
+head(finance_data,5)
+```
+
+## A.3
+
+Creating a new data frame "data_part1" that is a subset of finance_data
+
+```{r}
+#creating the variable data_part1 that is using data from finance_data
+data_part1 <- finance_data %>% 
+#applying a filter to ensure that IFC_CC is no less than 300000 and Loan_Guarantee_CC is no more than 500000
+  filter(IFC_CC>=300000 & Loan_Guarantee_CC <=500000) %>% 
+#ordering the rows in decending order based on the IFC_CC column
+  arrange(desc(IFC_CC))
+#displaying first 4 rows and three columns of the data_part1 data frame
+head(select(data_part1,IFC,IFC_CC,Loan_Guarantee_CC),4)
+```
+
+## A.4
+
+Adding a new column to the finance_data data frame called IFC_ratio which is the IFC_CC value divided by the sum of the Loan_Guarantee_CC and IFC_CC.
+
+```{r}
+#adding calculated column
+finance_data <- finance_data %>% 
+  mutate(IFC_ratio = IFC_CC/(IFC_CC+Loan_Guarantee_CC))
+#displaying first 5 rows and selected columns
+head(select(finance_data,IFC,IFC_CC,Loan_Guarantee_CC,IFC_ratio),5)
+```
+
+## A.5
+
+Splitting the "Date" column into 3 seperate columns, day, month and year.
+
+```{r}
+#splitting the "Date" column into 3 seperate columns, day, month and year
+finance_data <- finance_data %>% 
+  separate(col=Date,into=c("day","month","year"),sep="/", convert=TRUE)
+
+#displaying the first 5 rows and some selected columns
+head(select(finance_data,IFC_CC,day,month,year),5)
+```
+
+## A.6
+
+Creating a summary data frame using a group by of IFC and using various aggregation methods (mean, quantile and variance).
+
+```{r}
+summary_data <- finance_data %>% 
+  group_by(IFC) %>% 
+  summarise(ifc_mn=mean(IFC_CC,na.rm=TRUE),
+            ifc_21q=quantile(IFC_CC,probs=0.21, na.rm=TRUE),
+            ifc_var=var(IFC_CC,na.rm=TRUE),
+            lg_mn=mean(Loan_Guarantee_CC,na.rm=TRUE),
+            lg_21q=quantile(Loan_Guarantee_CC,probs=0.21, na.rm=TRUE),
+            lg_var=var(Loan_Guarantee_CC,na.rm=TRUE))
+#displaying the generated summary data frame
+summary_data
+```
+
+## A.7
+
+Plotting IFC Cumulative Commitments and Loan & Guarantee participations Cumulative Commitments as functions of the years, for two different countries Argentina and Brazil, respectively.
+
+```{r}
+#creating a new data frame to contain the plot data
+plot_data <- finance_data %>%
+  #divinding by 1000 so that the value can be represented in millions
+  mutate(IFC_CC = IFC_CC/1000) %>%
+  mutate(Loan_Guarantee_CC = Loan_Guarantee_CC/1000) %>%
+  #subtracting 2000 from the year so that the date can be represented by the last 2 digits of the year
+  mutate(year = year-2000) %>%
+  #filtering to only include the data for the countries of interest
+  filter(Country == "Argentina" | Country == "Brazil") %>% 
+  #selecting only the relevent columns
+  select(IFC_CC,Loan_Guarantee_CC,year,Country) %>% 
+  #pivoting the data for plotting
+  pivot_longer(cols=c("IFC_CC","Loan_Guarantee_CC"),
+               names_to="names",values_to="CC") %>% 
+  #configuring the plot
+  ggplot(aes(year,CC))+
+  geom_point(aes(color=names))+
+  facet_wrap(~Country) +
+  ylab('Cumulative Commitments (millions $)') +
+  theme_bw()
+
+plot_data
+```
+
+## A.8
+
+Function to replace NA's with the 0.9-quantile of the input vector
+
+```{r}
+impute_by_quantile <- function(vect){
+  #initilising with empty vector
+  vect_out <-c()
+  #iterating through each vector value
+  for (x in vect) {
+    if(is.na(x)){
+      vect_out <- append(vect_out,quantile(vect,probs=0.9, na.rm=TRUE))
+    }
+    else{vect_out <- append(vect_out,x)}
+  }
+  return(vect_out)
+}
+```
+
+```{r}
+#creating a new data frame "new_finance_data" from the finance_data data frame
+finance_data <- finance_data %>% 
+  #applying the impute_by_quantile function to columns and replacing their missing values
+  mutate(IFC_CC = impute_by_quantile(IFC_CC)) %>% 
+  mutate(Loan_Guarantee_CC = impute_by_quantile(Loan_Guarantee_CC)) %>% 
+  mutate(IFC_ratio = impute_by_quantile(IFC_ratio))
+
+disp_new_finance_data <- finance_data %>% 
+  #selecting relevant columns
+  select(IFC_CC,Loan_Guarantee_CC,IFC_ratio) %>% 
+  #applying group by 
+  summarise(IFC_CC=mean(IFC_CC),
+            Loan_Guarantee_CC=mean(Loan_Guarantee_CC),
+            IFC_ratio=mean(IFC_ratio))
+#displaying the filtered and summarised data 
+disp_new_finance_data
+```
